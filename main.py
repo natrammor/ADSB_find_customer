@@ -1,25 +1,16 @@
 import json
-import urllib
-import urllib2
 import logging
 import os
-import time
 import io
-import sys
 import numpy
 import math
-import matplotlib.pyplot as plt
 import pandas
-import scipy
-import seaborn as sns
 import re
 
+from pyflightdata import FlightData
+
 from datetime import datetime
-from sklearn import model_selection, metrics, preprocessing
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
-from sklearn.model_selection import cross_val_score
 
 
 def numericalSort(value):
@@ -56,19 +47,11 @@ def data_stored(data_dir, name_file, vv_countries, military):
 
     aircraft_by_icao = {}
 
-    VV_AIRLINES = [
-        "Ryanair", "Vueling", "Iberia", "Alitalia", "TUIfly", "Norwegian", "SAS",
-        "KLM", "EasyJet", "Air Europa", "Transavia France", "Lufthansa", "Turkish Airlines",
-        "Air France", "British Airways", "Iberia Express", "Vueling Airlines", "Lufthansa Regional",
-        "Hop!", "Eurowings", "Germanwings", "easyJet", "Virgin Atlantic Airways",
-        "Norwegian Air International", "Air Mediterranean", "Air Dolomiti", "Air Canada",
-        "Air Corsica", "Air Berlin", "SunExpress",
-        "Germania", "Air Hamburg", "Business Wings", "DHL Air", "Flybe"
-    ]
-
-    VV_AIRPORTS = [
-        "Paris", "Frankfurt", "London", "Roma", "Madrid", "Amsterdam", "Munich", "Zurich"
-    ]
+    fr = FlightData()
+    all_airlines = fr.get_airlines()
+    airlines_list = []
+    for airline_info in all_airlines:
+        airlines_list.append(airline_info['title'])
 
     for file in sorted(os.listdir(data_dir), key=numericalSort):
         print(file)
@@ -80,8 +63,6 @@ def data_stored(data_dir, name_file, vv_countries, military):
             file_adsbexchange.close()
 
         except ValueError:
-            #logging.exception(i)
-            #time.sleep(5)
             data_adsbexchange = {'acList': {}}
             file_adsbexchange.close()
             print("ERROR")
@@ -91,7 +72,8 @@ def data_stored(data_dir, name_file, vv_countries, military):
                 if "Op" not in aircraft:
                     continue
                 op = aircraft["Op"]
-                if op in VV_AIRLINES:
+                if any (element.upper() in op.upper() for element in airlines_list):
+                #    print(op)
                     continue
                 if aircraft.get("Cou", "Unknown country") not in vv_countries:
                     continue
@@ -110,12 +92,12 @@ def data_stored(data_dir, name_file, vv_countries, military):
                     #if range_longitudes is not None:
                 #    continue
 
-                departure = aircraft.get("From", "Unknown aiport")
-                arrival = aircraft.get("To", "Unknown airport")
+                #departure = aircraft.get("From", "Unknown aiport")
+                #arrival = aircraft.get("To", "Unknown airport")
 
-                if any(forbidden_airport in departure or forbidden_airport in arrival
-                       for forbidden_airport in VV_AIRPORTS):
-                    continue
+                #if any(forbidden_airport in departure or forbidden_airport in arrival
+                #       for forbidden_airport in VV_AIRPORTS):
+                #    continue
 
                 if aircraft['Icao'] in aircraft_by_icao:
                     record = aircraft_by_icao[aircraft['Icao']]
@@ -128,6 +110,7 @@ def data_stored(data_dir, name_file, vv_countries, military):
                 record['Species'] = aircraft.get('Species', '')
                 record['Interested'] = aircraft.get('Interested', '')
                 record['Reg'] = aircraft.get('Reg', '')
+                record['Country'] = aircraft.get('Cou', '')
 
                 if 'Positions' not in record:
                     record['Positions'] = []
@@ -140,7 +123,6 @@ def data_stored(data_dir, name_file, vv_countries, military):
 
             except Exception as e:
                 logging.exception(aircraft)
-                # time.sleep(5)
                 pass
 
     with open(name_file + ".txt", "w") as first_filtered_file:
@@ -153,17 +135,16 @@ def pre_machine_learning(name_file):
     R_EARTH = 6371
     with io.open(name_file + ".txt", 'r', encoding='utf8') as first_filtered_file:
         aircraft_by_icao = json.load(first_filtered_file)
-        print(aircraft_by_icao.keys())
+        #print(aircraft_by_icao.keys())
 
     with io.open(name_file + "_ML.txt", "w", encoding='utf8') as file_machine_learning:
         for aircraft_icao, aircraft in aircraft_by_icao.items():
-            print(aircraft_icao)
+            #print(aircraft_icao)
             latitude_list = []
             longitude_list = []
             heading_list = []
             altitude_list = []
             time_list = []
-
             for obs in aircraft['Positions']:
                 if obs['latitude'] and obs['longitude'] and obs['altitude'] and obs['heading'] and obs['time']:
                     latitude_list.append(float(obs['latitude']))
@@ -187,26 +168,24 @@ def pre_machine_learning(name_file):
             # Flights that are shorter than 2 hours are not of interest
             if duration < 120:
                 continue
-            print (aircraft['Operator'])
             file_machine_learning.write("%s,%s,%s,%s,%s,%s,%s\n" % (
                 aircraft['Operator'].replace(",", ""), aircraft_icao, duration,
                 box, median_alt, dev_std_heading, 'other'))
-
     return ()
 
 
 def random_forest_classifier(name_file):
     names_training = ['operator', 'duration', 'box', 'altitude', 'heading', 'class']
-    training_dataset = pandas.read_csv('/home/atm-wessling2/Desktop/Short term tareas/ADSB/ADSB_v.0.2/surveil_other_database.csv',
+    training_dataset = pandas.read_csv('/home/atm-wessling2/Desktop/ADSB_find_customer/surveil_other_database.csv',
                                        names=names_training)
     parameters = training_dataset.values[:, 1:5]
     classes = training_dataset.values[:, 5]
     RandomForestclf = RandomForestClassifier(n_estimators=250, random_state=0)
     RandomForestclf.fit(parameters, classes)
     names_predicting = ['operator', 'icao', 'duration', 'box', 'altitude', 'heading', 'class']
-    predicting_dataset = pandas.read_csv('/home/atm-wessling2/Desktop/Short term tareas/ADSB/ADSB_v.0.2/' + name_file + "_ML.txt",
+    predicting_dataset = pandas.read_csv('/home/atm-wessling2/Desktop/ADSB_find_customer/' + name_file + "_ML.txt",
                                          names=names_predicting)
-    print(predicting_dataset)
+    #print(predicting_dataset)
     parameters_prediction = predicting_dataset.values[:, 2:6]
     classes_prediction = RandomForestclf.predict(parameters_prediction)
     predicting_dataset.values[:, 6] = classes_prediction
@@ -223,11 +202,14 @@ def random_forest_classifier(name_file):
         else:
             record = {}
             surveil_list[aircraft_icao] = record
-        for field_name in ['Model', 'Operator', 'Registration', 'Species']:
+        for field_name in ['Model', 'Operator', 'Reg', 'Species', 'Country']:
             record[field_name] = aircraft[field_name]
         for (surveil_icao, surveil_duration) in predicting_dataset.values[:, (1, 2)]:
             if surveil_icao == aircraft_icao:
-                record['Duration'] = surveil_duration
+                try:
+                    record['Duration'].append(surveil_duration)  # To add the different flights
+                except KeyError:
+                    record['Duration'] = [surveil_duration]
 
     with open("surveil_final_" + name_file + ".txt", "w") as json_file:
         json.dump(surveil_list, json_file)

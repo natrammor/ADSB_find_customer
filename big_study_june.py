@@ -9,17 +9,19 @@ import json
 import os
 import io
 import csv
+import datetime
+import calendar
+import numpy
 
 from main import data_stored
 from main import pre_machine_learning
 from main import random_forest_classifier
 
-from pyflightdata import FlightData
 
 # File paths and conditions of the study
-data_dir = "/home/atm-wessling2/Desktop/Short term tareas/ADSB/ADSB_v.0.2/"
-name_file = "USA_june"
-vv_countries = "United States"
+data_dir = "/media/atm-wessling2/VERBATIM HD/Data ADSBExchange/"
+name_file = "France"
+vv_countries = "France"
 military = "n"
 
 # data_dir = raw_input("Which is the directory of the stored data? :: ")
@@ -32,30 +34,19 @@ military = "n"
 # latitude_min = input("Min Lat :: ")
 # latitude_max = input("Max Lat :: ")
 
-VECTOR_DAYS = [
-    "2017-06-01"]
-"""
-    , "2017-06-02", "2017-06-03", "2017-06-04", "2017-06-05",
-    "2017-06-06", "2017-06-07", "2017-06-08", "2017-06-09", "2017-06-10", "2017-06-11",
-    "2017-06-12", "2017-06-13", "2017-06-14", "2017-06-15", "2017-06-16", "2017-06-17",
-    "2017-06-18", "2017-06-19", "2017-06-20", "2017-06-21", "2017-06-22", "2017-06-23",
-    "2017-06-24", "2017-06-25", "2017-06-26", "2017-06-27", "2017-06-28", "2017-06-29",
-    "2017-06-30"
-]
-"""
+Start_day = datetime.datetime(2017,5,1)
+VECTOR_DAYS = [Start_day + datetime.timedelta(days=1*x) for x in range(0, 5)]
 
-# Creation of a list of airlines from FR24
-fr = FlightData()
-all_airlines = fr.get_airlines()
-airlines_list = []
-for airline_info in all_airlines:
-    airlines_list.append(airline_info['title'])
-
-helicopter_list = []
-aircraft_list = []
+aircraft_dict = {}
 with open('names.csv', 'w') as csvfile:
-    for day in VECTOR_DAYS:
-        data_dir2 = data_dir + "JUN_2017/" + day + "/"
+    fieldnames = ['Operator', 'Country', 'Specie', 'Model', 'Registration', 'Frequency',
+                  'Mean duration']
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    writer.writeheader()
+    for date in VECTOR_DAYS:
+        month = date.strftime("%B").upper()
+        day = date.strftime("_%Y/%Y-%m-%d")
+        data_dir2 = data_dir + month + day + "/"
         data_stored(data_dir2, name_file, vv_countries, military)
         try:
             pre_machine_learning(name_file)
@@ -65,19 +56,37 @@ with open('names.csv', 'w') as csvfile:
             data_to_study = json.loads(data_to_study_json)
             file_to_study.close()
             for aircraft in data_to_study.keys():
-                if data_to_study[aircraft]['Operator'] in airlines_list:
-
-                        fieldnames = ['Operator', 'Registration', '']
-                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-                        writer.writeheader()
-                        writer.writerow({'first_name': 'Baked', 'last_name': 'Beans'})
-                        writer.writerow({'first_name': 'Lovely', 'last_name': 'Spam'})
-                        writer.writerow({'first_name': 'Wonderful', 'last_name': 'Spam'})
-
+                if aircraft in aircraft_dict:
+                    record = aircraft_dict[aircraft]
+                else:
+                    record = {}
+                    aircraft_dict[aircraft] = record
+                for field_name in ['Model', 'Operator', 'Reg', 'Species', 'Country']:
+                    record[field_name] = data_to_study[aircraft][field_name]
+                    try:
+                        record['Duration'].append(data_to_study[aircraft]['Duration'])  # To add the different flights
+                    except KeyError:
+                        record['Duration'] = [data_to_study[aircraft]['Duration']]
             os.remove(name_file + '_ML.txt')
             os.remove(name_file + '.txt')
         except ValueError:
             continue
+    for aircraft in aircraft_dict.keys():
+        registration = aircraft_dict[aircraft]['Reg']
+        operator = aircraft_dict[aircraft]['Operator']
+        model = aircraft_dict[aircraft]['Model']
+        species = aircraft_dict[aircraft]['Species']
+        country = aircraft_dict[aircraft]['Country']
+        if species == 1:
+            specie = "A/C"
+        elif species == 4:
+            specie = "R/C"
+        else:
+            continue
+        frequency = len(aircraft_dict[aircraft]['Duration'])
+        mean_duration = numpy.mean(aircraft_dict[aircraft]['Duration'])
+        writer.writerow({'Operator': operator, 'Country': country, 'Specie': specie,
+                         'Model': model, 'Registration': registration, 'Frequency': frequency,
+                         'Mean duration': mean_duration})
 
 
